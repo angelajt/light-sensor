@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/deadsy/sdfx/render"
 	"github.com/deadsy/sdfx/sdf"
 	. "github.com/stevegt/goadapt"
@@ -22,10 +24,10 @@ const (
 
 // adafruit BNO055 IMU
 var imu = &Board{
-	X:       1.05 * in,
+	X:       1.0 * in,
 	Y:       0.8 * in,
 	Z:       15.0,
-	CtrsX:   .85 * in,
+	CtrsX:   .8 * in,
 	CtrsY:   .6 * in,
 	PostDia: 2.0, // hole dia 2.54
 }
@@ -121,7 +123,7 @@ type Body struct {
 func (b *Body) shape() (res sdf.SDF3) {
 	b.Id = b.Od1 - wall*2
 	lipOd := b.Od2 + 4
-	lipZ := hubDepth - wall
+	lipZ := hubDepth + wall/2.0
 
 	depth1 := hubDepth / 2.0
 	depth2 := body.Z - depth1
@@ -149,12 +151,39 @@ func (b *Body) shape() (res sdf.SDF3) {
 
 	pocket, err := sdf.Cylinder3D(body.Z, b.Id/2.0, 1.0)
 	Ck(err)
-	pocket = sdf.Transform3D(pocket, sdf.Translate3d(sdf.V3{0, 0, body.Z/2.0 + wall}))
+	pocket = sdf.Transform3D(pocket, sdf.Translate3d(sdf.V3{0, 0, body.Z/2.0 + wall/2.0}))
 
 	res = sdf.Difference3D(res, pocket)
 
 	return
 }
+
+type Baseplate struct {
+	sdf sdf.SDF3
+	Od1 float64
+	Od2 float64
+	Z   float64
+}
+
+// func (s *Baseplate) Evaluate(p sdf.V3) float64 { return s.sdf.Evaluate(p) }
+// func (s *Baseplate) BoundingBox() sdf.Box3     { return s.sdf.BoundingBox() }
+
+func (b Baseplate) init() Baseplate {
+
+	circle1, err := sdf.Circle2D(b.Od1 / 2.0)
+	Ck(err)
+
+	circle2, err := sdf.Circle2D(b.Od2 / 2.0)
+	Ck(err)
+
+	b.sdf, err = sdf.Loft3D(circle1, circle2, wall, 0)
+	Ck(err)
+	b.sdf = sdf.Transform3D(b.sdf, sdf.Translate3d(sdf.V3{0, 0, wall / 2.0}))
+
+	return b
+}
+
+// func (b Baseplate)
 
 func main() {
 	imuTop := wall + imu.Z
@@ -167,7 +196,7 @@ func main() {
 
 	coverZ := wall * 2
 	body.Z = battery.CornerZ + coverZ/2.0
-	res := body.shape()
+	b := body.shape()
 
 	coverOd := hubOd
 	coverId := body.Id
@@ -188,8 +217,14 @@ func main() {
 	cover = sdf.Union3D(cover, covinner)
 	cover = sdf.Transform3D(cover, sdf.Translate3d(sdf.V3{0, 0, body.Z}))
 
-	res = sdf.Union3D(res, feather.posts(), imu.posts(), corners)
-	// res = sdf.Union3D(res, feather.posts(), imu.posts(), bat, corners)
-	render.RenderSTL(res, 300, "body.stl")
+	// fmt.Println(cover.BoundingBox())
+
+	baseplate := Baseplate{Od1: body.Id - wall, Od2: body.Id}.init()
+	baseplate.sdf = sdf.Union3D(baseplate.sdf, feather.posts(), imu.posts(), corners)
+	fmt.Println(baseplate.Od1)
+	b = sdf.Difference3D(b, baseplate.sdf)
+
+	render.RenderSTL(b, 300, "body.stl")
 	render.RenderSTL(cover, 300, "cover.stl")
+	render.RenderSTL(baseplate.sdf, 300, "baseplate.stl")
 }
