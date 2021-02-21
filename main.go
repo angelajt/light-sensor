@@ -14,12 +14,15 @@ const (
 	scale = 1.0 // PETG no shrinkage
 
 	// E450 brake rotor hub
-	hubId    = 100.0
+	hubId    = 4 * in
 	hubOd    = 110.0
 	hubDepth = 20.0
 
 	wall    = 3.0
 	spacing = 3.0
+
+	// const so reprints are compatible
+	bodyId = 90.6
 )
 
 // adafruit BNO055 IMU
@@ -48,11 +51,6 @@ var battery = &Battery{
 	Y:       50.5,
 	Z:       8.1,
 	CornerW: wall + 10,
-}
-
-var body = &Body{
-	Od1: hubId - 5,
-	Od2: hubId,
 }
 
 type Board struct {
@@ -114,19 +112,20 @@ func (b *Battery) shape() (res sdf.SDF3) {
 }
 
 type Body struct {
+	s   sdf.SDF3
 	Od1 float64
 	Od2 float64
 	Z   float64
 	Id  float64
 }
 
-func (b *Body) shape() (res sdf.SDF3) {
+func (b Body) init() Body {
 	b.Id = b.Od1 - wall*2
 	lipOd := b.Od2 + 4
 	lipZ := hubDepth + wall/2.0
 
 	depth1 := hubDepth / 2.0
-	depth2 := body.Z - depth1
+	depth2 := b.Z - depth1
 
 	circle1, err := sdf.Circle2D(b.Od1 / 2.0)
 	Ck(err)
@@ -134,32 +133,32 @@ func (b *Body) shape() (res sdf.SDF3) {
 	circle2, err := sdf.Circle2D(b.Od2 / 2.0)
 	Ck(err)
 
-	res, err = sdf.Loft3D(circle1, circle2, depth1, 0)
+	b.s, err = sdf.Loft3D(circle1, circle2, depth1, 0)
 	Ck(err)
-	res = sdf.Transform3D(res, sdf.Translate3d(sdf.V3{0, 0, depth1 / 2.0}))
+	b.s = sdf.Transform3D(b.s, sdf.Translate3d(sdf.V3{0, 0, depth1 / 2.0}))
 
 	cyl2, err := sdf.Cylinder3D(depth2, b.Od2/2.0, 0)
 	Ck(err)
 	cyl2 = sdf.Transform3D(cyl2, sdf.Translate3d(sdf.V3{0, 0, depth1 + depth2/2.0}))
-	res = sdf.Union3D(res, cyl2)
+	b.s = sdf.Union3D(b.s, cyl2)
 
 	lip, err := sdf.Cylinder3D(wall, lipOd/2.0, 1.0)
 	Ck(err)
 	lip = sdf.Transform3D(lip, sdf.Translate3d(sdf.V3{0, 0, lipZ + wall/2.0}))
 
-	res = sdf.Union3D(res, lip)
+	b.s = sdf.Union3D(b.s, lip)
 
-	pocket, err := sdf.Cylinder3D(body.Z, b.Id/2.0, 1.0)
+	pocket, err := sdf.Cylinder3D(b.Z, b.Id/2.0, 1.0)
 	Ck(err)
-	pocket = sdf.Transform3D(pocket, sdf.Translate3d(sdf.V3{0, 0, body.Z/2.0 + wall/2.0}))
+	pocket = sdf.Transform3D(pocket, sdf.Translate3d(sdf.V3{0, 0, b.Z/2.0 + wall/2.0}))
 
-	res = sdf.Difference3D(res, pocket)
+	b.s = sdf.Difference3D(b.s, pocket)
 
-	return
+	return b
 }
 
 type Baseplate struct {
-	sdf sdf.SDF3
+	s   sdf.SDF3
 	Od1 float64
 	Od2 float64
 	Z   float64
@@ -176,9 +175,9 @@ func (b Baseplate) init() Baseplate {
 	circle2, err := sdf.Circle2D(b.Od2 / 2.0)
 	Ck(err)
 
-	b.sdf, err = sdf.Loft3D(circle1, circle2, wall, 0)
+	b.s, err = sdf.Loft3D(circle1, circle2, wall, 0)
 	Ck(err)
-	b.sdf = sdf.Transform3D(b.sdf, sdf.Translate3d(sdf.V3{0, 0, wall / 2.0}))
+	b.s = sdf.Transform3D(b.s, sdf.Translate3d(sdf.V3{0, 0, wall / 2.0}))
 
 	return b
 }
@@ -186,6 +185,7 @@ func (b Baseplate) init() Baseplate {
 // func (b Baseplate)
 
 func main() {
+
 	imuTop := wall + imu.Z
 	imu.PostZ = imuTop - 5
 	feather.PostZ = imuTop + feather.Z - 5
@@ -195,8 +195,8 @@ func main() {
 	battery.CornerZ = batteryBotZ + battery.Z
 
 	coverZ := wall * 2
-	body.Z = battery.CornerZ + coverZ/2.0
-	b := body.shape()
+
+	body := Body{Od1: hubId - 5, Od2: hubId, Id: bodyId, Z: battery.CornerZ + coverZ/2.0}.init()
 
 	coverOd := hubOd
 	coverId := body.Id
@@ -220,11 +220,13 @@ func main() {
 	// fmt.Println(cover.BoundingBox())
 
 	baseplate := Baseplate{Od1: body.Id - wall, Od2: body.Id}.init()
-	baseplate.sdf = sdf.Union3D(baseplate.sdf, feather.posts(), imu.posts(), corners)
-	fmt.Println(baseplate.Od1)
-	b = sdf.Difference3D(b, baseplate.sdf)
+	baseplate.s = sdf.Union3D(baseplate.s, feather.posts(), imu.posts(), corners)
+	// fmt.Println(baseplate.Od1)
+	body.s = sdf.Difference3D(body.s, baseplate.s)
 
-	render.RenderSTL(b, 300, "body.stl")
+	fmt.Println("body Id", body.Id)
+
+	render.RenderSTL(body.s, 300, "body.stl")
 	render.RenderSTL(cover, 300, "cover.stl")
-	render.RenderSTL(baseplate.sdf, 300, "baseplate.stl")
+	render.RenderSTL(baseplate.s, 300, "baseplate.stl")
 }
