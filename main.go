@@ -199,7 +199,7 @@ func main() {
 	body := Body{Od1: hubId - 5, Od2: hubId, Id: bodyId, Z: battery.CornerZ + coverZ/2.0}.init()
 
 	coverOd := hubOd
-	coverId := body.Id
+	coverId := body.Id + 0.1
 
 	bat := battery.shape()
 	bat = sdf.Transform3D(bat, sdf.Translate3d(sdf.V3{0, 0, batteryBotZ + battery.Z/2.0}))
